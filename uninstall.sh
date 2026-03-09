@@ -8,6 +8,7 @@ set -euo pipefail
 # Usage:
 #   ./uninstall.sh                          # Interactive mode
 #   ./uninstall.sh --ip 1.2.3.4 --pass x    # Non-interactive
+#   ./uninstall.sh --ip 1.2.3.4 --key ~/.ssh/id_rsa  # SSH key auth
 # =============================================================================
 
 RED='\033[0;31m'
@@ -23,8 +24,7 @@ ask()   { echo -en "${CYAN}[?]${NC} $1"; }
 
 check_dependencies() {
   local missing=()
-  command -v ssh     >/dev/null || missing+=(openssh)
-  command -v sshpass >/dev/null || missing+=(sshpass)
+  command -v ssh >/dev/null || missing+=(openssh)
 
   if [ ${#missing[@]} -gt 0 ]; then
     error "Missing dependencies: ${missing[*]}"
@@ -34,6 +34,21 @@ check_dependencies() {
       echo "  apt-get install -y ${missing[*]}"
     fi
     exit 1
+  fi
+}
+
+# SSH_KEY is set globally in main(). When set, uses key auth; otherwise password auth via sshpass.
+run_ssh() {
+  local pass="$1"
+  shift
+  if [ -n "${SSH_KEY:-}" ]; then
+    ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$@"
+  else
+    if ! command -v sshpass >/dev/null; then
+      error "sshpass is required for password authentication. Install it or use --key."
+      exit 1
+    fi
+    sshpass -p "$pass" ssh -o StrictHostKeyChecking=no "$@"
   fi
 }
 
@@ -50,6 +65,7 @@ main() {
   local SERVER_IP=""
   local SERVER_PASS=""
   local SSH_USER="root"
+  local SSH_KEY=""
   local DOMAIN=""
 
   # Parse arguments
@@ -58,14 +74,16 @@ main() {
       --ip)     SERVER_IP="$2";    shift 2 ;;
       --pass)   SERVER_PASS="$2";  shift 2 ;;
       --user)   SSH_USER="$2";     shift 2 ;;
+      --key)    SSH_KEY="$2";      shift 2 ;;
       --domain) DOMAIN="$2";       shift 2 ;;
       -h|--help)
         echo "Usage: $0 [OPTIONS]"
         echo ""
         echo "Options:"
         echo "  --ip IP            Server IP address"
-        echo "  --pass PASSWORD    Server password"
+        echo "  --pass PASSWORD    Server password (not needed with --key)"
         echo "  --user USER        SSH username (default: root, uses sudo for non-root)"
+        echo "  --key PATH         SSH private key path (alternative to password auth)"
         echo "  --domain DOMAIN    Domain name (for certificate cleanup)"
         echo "  -h, --help         Show this help"
         exit 0
@@ -80,16 +98,32 @@ main() {
     read -r SERVER_IP
   fi
 
-  if [ -z "$SERVER_PASS" ]; then
-    ask "Password for $SSH_USER: "
-    read -rs SERVER_PASS
-    echo ""
-  fi
-
   if [ "$SSH_USER" = "root" ]; then
     ask "SSH username [root]: "
     read -r input_user
     SSH_USER="${input_user:-root}"
+  fi
+
+  if [ -z "$SERVER_PASS" ] && [ -z "$SSH_KEY" ]; then
+    ask "SSH private key path (press Enter for password auth): "
+    read -r input_key
+    if [ -n "$input_key" ]; then
+      if [ ! -f "$input_key" ]; then
+        error "Key file not found: $input_key"
+        exit 1
+      fi
+      SSH_KEY="$input_key"
+    else
+      ask "Password for $SSH_USER: "
+      read -rs SERVER_PASS
+      echo ""
+    fi
+  fi
+
+  # Validate key file if provided via --key
+  if [ -n "$SSH_KEY" ] && [ ! -f "$SSH_KEY" ]; then
+    error "SSH key file not found: $SSH_KEY"
+    exit 1
   fi
 
   if [ -z "$DOMAIN" ]; then
@@ -136,7 +170,7 @@ rm -rf /var/www/html/apps/
 "
   fi
 
-  sshpass -p "$SERVER_PASS" ssh -o StrictHostKeyChecking=no "$SSH_USER@$SERVER_IP" "$SUDO bash -s" << REMOTE_SCRIPT
+  run_ssh "$SERVER_PASS" "$SSH_USER@$SERVER_IP" "$SUDO bash -s" << REMOTE_SCRIPT
 set -e
 
 echo ">>> Stopping services..."

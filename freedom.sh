@@ -10,6 +10,7 @@ set -euo pipefail
 #   ./freedom.sh                          # Interactive mode
 #   ./freedom.sh --do-token YOUR_TOKEN    # Create a new DigitalOcean droplet
 #   ./freedom.sh --user ubuntu --ip x     # Use non-root SSH user (sudo)
+#   ./freedom.sh --key ~/.ssh/id_rsa      # Use SSH key authentication
 # =============================================================================
 
 RED='\033[0;31m'
@@ -28,7 +29,6 @@ ask()   { echo -en "${CYAN}[?]${NC} $1"; }
 check_dependencies() {
   local missing=()
   command -v ssh      >/dev/null || missing+=(openssh)
-  command -v sshpass  >/dev/null || missing+=(sshpass)
   command -v uuidgen  >/dev/null || missing+=(uuidgen)
   command -v openssl  >/dev/null || missing+=(openssl)
   command -v jq       >/dev/null || missing+=(jq)
@@ -44,6 +44,23 @@ check_dependencies() {
       echo "  apt-get install -y ${missing[*]}"
     fi
     exit 1
+  fi
+}
+
+# --------------- SSH helper ---------------
+
+# SSH_KEY is set globally in main(). When set, uses key auth; otherwise password auth via sshpass.
+run_ssh() {
+  local pass="$1"
+  shift
+  if [ -n "${SSH_KEY:-}" ]; then
+    ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$@"
+  else
+    if ! command -v sshpass >/dev/null; then
+      error "sshpass is required for password authentication. Install it or use --key."
+      exit 1
+    fi
+    sshpass -p "$pass" ssh -o StrictHostKeyChecking=no "$@"
   fi
 }
 
@@ -119,16 +136,17 @@ create_droplet() {
 
   info "Droplet is ready! IP: $ip"
 
-  # If no SSH keys were used, we need to wait for the password email
-  # But DO doesn't support password-based creation well anymore
-  # So we'll set the password via console or expect SSH keys
-  if [ -n "$ssh_key_ids" ] && [ "$ssh_key_ids" != "null" ] && [ "$ssh_key_ids" != "" ]; then
+  # If using key auth, no password needed
+  if [ -n "${SSH_KEY:-}" ]; then
+    info "Using SSH key authentication for the new droplet."
+    root_pass=""
+  elif [ -n "$ssh_key_ids" ] && [ "$ssh_key_ids" != "null" ] && [ "$ssh_key_ids" != "" ]; then
     warn "Droplet created with SSH key authentication."
     warn "You'll need to set a root password or provide SSH key access."
     ask "Enter a root password to set (or press enter to use SSH key): "
     read -r root_pass
     if [ -z "$root_pass" ]; then
-      error "Password-less SSH not supported by this script yet. Please provide a password."
+      error "Password-less SSH not supported without --key. Please provide a password or use --key."
       echo "  You can SSH in manually and set one: ssh root@$ip"
       echo "  Then re-run this script with: ./freedom.sh"
       exit 1
@@ -141,7 +159,7 @@ create_droplet() {
   # Wait for SSH to become available
   info "Waiting for SSH to become available..."
   local ssh_attempts=0
-  while ! sshpass -p "$SERVER_PASS" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 "${SSH_USER}@${SERVER_IP}" 'echo ok' &>/dev/null; do
+  while ! run_ssh "$SERVER_PASS" -o ConnectTimeout=5 "${SSH_USER}@${SERVER_IP}" 'echo ok' &>/dev/null; do
     sleep 5
     ssh_attempts=$((ssh_attempts + 1))
     if [ $ssh_attempts -gt 60 ]; then
@@ -217,7 +235,7 @@ setup_server() {
 
   # Step 1: Base packages + Nginx + TLS
   info "Installing packages and obtaining TLS certificate..."
-  sshpass -p "$pass" ssh -o StrictHostKeyChecking=no "$user@$ip" "$sudo_cmd bash -s" << REMOTE_SCRIPT
+  run_ssh "$pass" "$user@$ip" "$sudo_cmd bash -s" << REMOTE_SCRIPT
 set -e
 export DEBIAN_FRONTEND=noninteractive
 
@@ -415,7 +433,7 @@ get_server_keys() {
   local sudo_cmd=""
   [ "$user" != "root" ] && sudo_cmd="sudo"
 
-  sshpass -p "$pass" ssh -o StrictHostKeyChecking=no "$user@$ip" "$sudo_cmd cat /root/.vpn-keys" 2>/dev/null
+  run_ssh "$pass" "$user@$ip" "$sudo_cmd cat /root/.vpn-keys" 2>/dev/null
 }
 
 # --------------- Generate guide ---------------
@@ -705,6 +723,7 @@ main() {
   local SERVER_IP=""
   local SERVER_PASS=""
   local SSH_USER="root"
+  local SSH_KEY=""
   local DOMAIN=""
   local OUTPUT_DIR="."
 
@@ -715,6 +734,7 @@ main() {
       --ip)        SERVER_IP="$2";    shift 2 ;;
       --pass)      SERVER_PASS="$2";  shift 2 ;;
       --user)      SSH_USER="$2";     shift 2 ;;
+      --key)       SSH_KEY="$2";      shift 2 ;;
       --domain)    DOMAIN="$2";       shift 2 ;;
       --output)    OUTPUT_DIR="$2";   shift 2 ;;
       -h|--help)
@@ -723,8 +743,9 @@ main() {
         echo "Options:"
         echo "  --do-token TOKEN   DigitalOcean API token (creates a new droplet)"
         echo "  --ip IP            Server IP address"
-        echo "  --pass PASSWORD    Server password"
+        echo "  --pass PASSWORD    Server password (not needed with --key)"
         echo "  --user USER        SSH username (default: root, uses sudo for non-root)"
+        echo "  --key PATH         SSH private key path (alternative to password auth)"
         echo "  --domain DOMAIN    Domain name (must have A record pointing to server)"
         echo "  --output DIR       Output directory for generated guide (default: .)"
         echo "  -h, --help         Show this help"
@@ -791,10 +812,26 @@ main() {
     SSH_USER="${input_user:-root}"
   fi
 
-  if [ -z "$SERVER_PASS" ]; then
-    ask "Password for $SSH_USER: "
-    read -rs SERVER_PASS
-    echo ""
+  if [ -z "$SERVER_PASS" ] && [ -z "$SSH_KEY" ]; then
+    ask "SSH private key path (press Enter for password auth): "
+    read -r input_key
+    if [ -n "$input_key" ]; then
+      if [ ! -f "$input_key" ]; then
+        error "Key file not found: $input_key"
+        exit 1
+      fi
+      SSH_KEY="$input_key"
+    else
+      ask "Password for $SSH_USER: "
+      read -rs SERVER_PASS
+      echo ""
+    fi
+  fi
+
+  # Validate key file if provided via --key
+  if [ -n "$SSH_KEY" ] && [ ! -f "$SSH_KEY" ]; then
+    error "SSH key file not found: $SSH_KEY"
+    exit 1
   fi
 
   if [ -z "$DOMAIN" ]; then
