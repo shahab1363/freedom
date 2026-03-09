@@ -395,17 +395,28 @@ systemctl enable hysteria-server && systemctl restart hysteria-server
 echo ">>> Downloading Android APKs..."
 mkdir -p /var/www/html/apps
 
-V2RAYNG_URL=\$(curl -s https://api.github.com/repos/2dust/v2rayNG/releases/latest | grep -oP '"browser_download_url":\s*"\K[^"]*universal[^"]*\.apk' | head -1)
-[ -z "\$V2RAYNG_URL" ] && V2RAYNG_URL=\$(curl -s https://api.github.com/repos/2dust/v2rayNG/releases/latest | grep -oP '"browser_download_url":\s*"\K[^"]*\.apk' | head -1)
-curl -L -o /var/www/html/apps/v2rayNG.apk "\$V2RAYNG_URL"
+REPO_APK_BASE="https://github.com/shahab1363/freedom/releases/latest/download"
 
-NEKOBOX_URL=\$(curl -s https://api.github.com/repos/MatsuriDayo/NekoBoxForAndroid/releases/latest | grep -oP '"browser_download_url":\s*"\K[^"]*arm64-v8a[^"]*\.apk' | head -1)
-[ -z "\$NEKOBOX_URL" ] && NEKOBOX_URL=\$(curl -s https://api.github.com/repos/MatsuriDayo/NekoBoxForAndroid/releases/latest | grep -oP '"browser_download_url":\s*"\K[^"]*\.apk' | head -1)
-curl -L -o /var/www/html/apps/NekoBox.apk "\$NEKOBOX_URL"
+echo "  -> v2rayNG..."
+curl -fsSL -o /var/www/html/apps/v2rayNG.apk "\${REPO_APK_BASE}/v2rayNG.apk" 2>/dev/null || {
+  V2RAYNG_URL=\$(curl -sL https://api.github.com/repos/2dust/v2rayNG/releases/latest | jq -r '[.assets[] | select(.name | test("universal.*\\\\.apk\$"; "i"))][0].browser_download_url // empty')
+  [ -z "\$V2RAYNG_URL" ] && V2RAYNG_URL=\$(curl -sL https://api.github.com/repos/2dust/v2rayNG/releases/latest | jq -r '[.assets[] | select(.name | endswith(".apk"))][0].browser_download_url // empty')
+  [ -n "\$V2RAYNG_URL" ] && curl -fSL -o /var/www/html/apps/v2rayNG.apk "\$V2RAYNG_URL"
+}
 
-HIDDIFY_URL=\$(curl -s https://api.github.com/repos/hiddify/hiddify-app/releases/latest | grep -oP '"browser_download_url":\s*"\K[^"]*android-universal[^"]*\.apk' | head -1)
-[ -z "\$HIDDIFY_URL" ] && HIDDIFY_URL=\$(curl -s https://api.github.com/repos/hiddify/hiddify-app/releases/latest | grep -oP '"browser_download_url":\s*"\K[^"]*android[^"]*\.apk' | head -1)
-curl -L -o /var/www/html/apps/Hiddify.apk "\$HIDDIFY_URL"
+echo "  -> NekoBox..."
+curl -fsSL -o /var/www/html/apps/NekoBox.apk "\${REPO_APK_BASE}/NekoBox.apk" 2>/dev/null || {
+  NEKOBOX_URL=\$(curl -sL https://api.github.com/repos/MatsuriDayo/NekoBoxForAndroid/releases/latest | jq -r '[.assets[] | select(.name | test("arm64-v8a.*\\\\.apk\$"; "i"))][0].browser_download_url // empty')
+  [ -z "\$NEKOBOX_URL" ] && NEKOBOX_URL=\$(curl -sL https://api.github.com/repos/MatsuriDayo/NekoBoxForAndroid/releases/latest | jq -r '[.assets[] | select(.name | endswith(".apk"))][0].browser_download_url // empty')
+  [ -n "\$NEKOBOX_URL" ] && curl -fSL -o /var/www/html/apps/NekoBox.apk "\$NEKOBOX_URL"
+}
+
+echo "  -> Hiddify..."
+curl -fsSL -o /var/www/html/apps/Hiddify.apk "\${REPO_APK_BASE}/Hiddify.apk" 2>/dev/null || {
+  HIDDIFY_URL=\$(curl -sL https://api.github.com/repos/hiddify/hiddify-app/releases/latest | jq -r '[.assets[] | select(.name | test("android-universal.*\\\\.apk\$"; "i"))][0].browser_download_url // empty')
+  [ -z "\$HIDDIFY_URL" ] && HIDDIFY_URL=\$(curl -sL https://api.github.com/repos/hiddify/hiddify-app/releases/latest | jq -r '[.assets[] | select(.name | test("android.*\\\\.apk\$"; "i"))][0].browser_download_url // empty')
+  [ -n "\$HIDDIFY_URL" ] && curl -fSL -o /var/www/html/apps/Hiddify.apk "\$HIDDIFY_URL"
+}
 
 echo ">>> Opening firewall ports..."
 ufw allow 443/tcp  2>/dev/null || true
