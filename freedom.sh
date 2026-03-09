@@ -9,6 +9,7 @@ set -euo pipefail
 # Usage:
 #   ./freedom.sh                          # Interactive mode
 #   ./freedom.sh --do-token YOUR_TOKEN    # Create a new DigitalOcean droplet
+#   ./freedom.sh --user ubuntu --ip x     # Use non-root SSH user (sudo)
 # =============================================================================
 
 RED='\033[0;31m'
@@ -140,7 +141,7 @@ create_droplet() {
   # Wait for SSH to become available
   info "Waiting for SSH to become available..."
   local ssh_attempts=0
-  while ! sshpass -p "$SERVER_PASS" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@"$SERVER_IP" 'echo ok' &>/dev/null; do
+  while ! sshpass -p "$SERVER_PASS" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 "${SSH_USER}@${SERVER_IP}" 'echo ok' &>/dev/null; do
     sleep 5
     ssh_attempts=$((ssh_attempts + 1))
     if [ $ssh_attempts -gt 60 ]; then
@@ -207,14 +208,16 @@ setup_server() {
   local uuid="$4"
   local ss_pass="$5"
   local email="$6"
+  local user="$7"
 
-  local ssh_cmd="sshpass -p '$pass' ssh -o StrictHostKeyChecking=no root@$ip"
+  local sudo_cmd=""
+  [ "$user" != "root" ] && sudo_cmd="sudo"
 
   info "Setting up server at $ip for domain $domain..."
 
   # Step 1: Base packages + Nginx + TLS
   info "Installing packages and obtaining TLS certificate..."
-  sshpass -p "$pass" ssh -o StrictHostKeyChecking=no "root@$ip" "bash -s" << REMOTE_SCRIPT
+  sshpass -p "$pass" ssh -o StrictHostKeyChecking=no "$user@$ip" "$sudo_cmd bash -s" << REMOTE_SCRIPT
 set -e
 export DEBIAN_FRONTEND=noninteractive
 
@@ -407,8 +410,12 @@ REMOTE_SCRIPT
 get_server_keys() {
   local ip="$1"
   local pass="$2"
+  local user="$3"
 
-  sshpass -p "$pass" ssh -o StrictHostKeyChecking=no "root@$ip" 'cat /root/.vpn-keys' 2>/dev/null
+  local sudo_cmd=""
+  [ "$user" != "root" ] && sudo_cmd="sudo"
+
+  sshpass -p "$pass" ssh -o StrictHostKeyChecking=no "$user@$ip" "$sudo_cmd cat /root/.vpn-keys" 2>/dev/null
 }
 
 # --------------- Generate guide ---------------
@@ -697,6 +704,7 @@ main() {
   local DO_TOKEN=""
   local SERVER_IP=""
   local SERVER_PASS=""
+  local SSH_USER="root"
   local DOMAIN=""
   local OUTPUT_DIR="."
 
@@ -706,6 +714,7 @@ main() {
       --do-token)  DO_TOKEN="$2";     shift 2 ;;
       --ip)        SERVER_IP="$2";    shift 2 ;;
       --pass)      SERVER_PASS="$2";  shift 2 ;;
+      --user)      SSH_USER="$2";     shift 2 ;;
       --domain)    DOMAIN="$2";       shift 2 ;;
       --output)    OUTPUT_DIR="$2";   shift 2 ;;
       -h|--help)
@@ -714,7 +723,8 @@ main() {
         echo "Options:"
         echo "  --do-token TOKEN   DigitalOcean API token (creates a new droplet)"
         echo "  --ip IP            Server IP address"
-        echo "  --pass PASSWORD    Server root password"
+        echo "  --pass PASSWORD    Server password"
+        echo "  --user USER        SSH username (default: root, uses sudo for non-root)"
         echo "  --domain DOMAIN    Domain name (must have A record pointing to server)"
         echo "  --output DIR       Output directory for generated guide (default: .)"
         echo "  -h, --help         Show this help"
@@ -775,8 +785,14 @@ main() {
     read -r SERVER_IP
   fi
 
+  if [ "$SSH_USER" = "root" ] && [ -z "$DO_TOKEN" ]; then
+    ask "SSH username [root]: "
+    read -r input_user
+    SSH_USER="${input_user:-root}"
+  fi
+
   if [ -z "$SERVER_PASS" ]; then
-    ask "Root password: "
+    ask "Password for $SSH_USER: "
     read -rs SERVER_PASS
     echo ""
   fi
@@ -828,13 +844,17 @@ main() {
 
   # ---- Run setup ----
 
-  setup_server "$SERVER_IP" "$SERVER_PASS" "$DOMAIN" "$UUID" "$SS_PASS" "$EMAIL"
+  if [ "$SSH_USER" != "root" ]; then
+    info "Using sudo for non-root user '$SSH_USER'"
+  fi
+
+  setup_server "$SERVER_IP" "$SERVER_PASS" "$DOMAIN" "$UUID" "$SS_PASS" "$EMAIL" "$SSH_USER"
 
   # ---- Retrieve Reality keys ----
 
   info "Retrieving Reality keys from server..."
   local keys_output
-  keys_output=$(get_server_keys "$SERVER_IP" "$SERVER_PASS")
+  keys_output=$(get_server_keys "$SERVER_IP" "$SERVER_PASS" "$SSH_USER")
 
   local REALITY_PUBLIC SHORT_ID
   REALITY_PUBLIC=$(echo "$keys_output" | grep REALITY_PUBLIC | cut -d= -f2)
