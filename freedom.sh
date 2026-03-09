@@ -450,6 +450,11 @@ css: |-
     direction: ltr !important;
     text-align: left !important;
     unicode-bidi: bidi-override;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-size: 0.75em;
   }
   table {
     width: 100%;
