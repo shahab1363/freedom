@@ -492,6 +492,27 @@ css: |-
     word-break: break-all;
     font-size: 0.75em;
   }
+  .config-url {
+    direction: ltr;
+    text-align: left;
+    background: #f4f4f4;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 10px;
+    margin: 8px 0;
+    word-break: break-all;
+    overflow-wrap: break-word;
+    font-family: monospace;
+    font-size: 0.75em;
+    line-height: 1.5;
+  }
+  .config-url a {
+    color: #1a0dab;
+    text-decoration: none;
+  }
+  .config-url a:hover {
+    text-decoration: underline;
+  }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -531,9 +552,7 @@ MDHEAD
 
 ### 1. VMess + WebSocket + TLS (پیشنهادی برای شروع)
 
-\`\`\`
-${vmess_link}
-\`\`\`
+<div class="config-url"><a href="${vmess_link}">${vmess_link}</a></div>
 
 > ترافیک شما شبیه به HTTPS عادی به نظر می‌رسد. از پورت 443 استفاده می‌کند.
 
@@ -541,9 +560,7 @@ ${vmess_link}
 
 ### 2. VLESS + Reality (بهترین برای دور زدن فیلترینگ پیشرفته)
 
-\`\`\`
-${vless_link}
-\`\`\`
+<div class="config-url"><a href="${vless_link}">${vless_link}</a></div>
 
 > جدیدترین و امن‌ترین پروتکل. ترافیک شما کاملاً شبیه اتصال عادی به Google به نظر می‌رسد. اگر VMess مسدود شد، این گزینه را امتحان کنید.
 
@@ -551,9 +568,7 @@ ${vless_link}
 
 ### 3. Hysteria2 (سریع‌ترین - مناسب برای ویدیو و بازی)
 
-\`\`\`
-${hy2_link}
-\`\`\`
+<div class="config-url"><a href="${hy2_link}">${hy2_link}</a></div>
 
 > از پروتکل UDP استفاده می‌کند و بسیار سریع است. برای تماشای ویدیو و بازی آنلاین عالی است. اگر UDP مسدود شده باشد کار نمی‌کند.
 
@@ -561,9 +576,7 @@ ${hy2_link}
 
 ### 4. Shadowsocks (ساده و سبک)
 
-\`\`\`
-${ss_link}
-\`\`\`
+<div class="config-url"><a href="${ss_link}">${ss_link}</a></div>
 
 > سبک‌ترین پروتکل. مصرف باتری کمتر. مناسب برای گوشی‌های قدیمی.
 
